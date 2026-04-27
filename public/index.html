@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>MFA Auth System</title>
+  <style>
+    body { font-family: 'Inter', sans-serif; background: #f4f7f6; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+    .container { background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); width: 350px; text-align: center; }
+    input { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+    button { width: 100%; padding: 10px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; margin-bottom: 10px; }
+    button:hover { background: #0056b3; }
+    .oauth-btn { background: #fff; color: #333; border: 1px solid #ccc; }
+    .oauth-btn:hover { background: #f0f0f0; }
+    .hidden { display: none; }
+    .error { color: red; font-size: 14px; margin-bottom: 10px; }
+    .success { color: green; font-size: 14px; margin-bottom: 10px; }
+  </style>
+</head>
+<body>
+  <div class="container" id="login-screen">
+    <h2>Login</h2>
+    <div id="login-error" class="error"></div>
+    <form id="login-form">
+      <input type="email" id="email" placeholder="Email" required value="test@example.com" />
+      <input type="password" id="password" placeholder="Password" required value="password123" />
+      <button type="submit">Login</button>
+    </form>
+    <hr />
+    <button class="oauth-btn" onclick="openOAuth('/oauth/google')">Login with Google</button>
+    <button class="oauth-btn" onclick="openOAuth('/oauth/microsoft')">Login with Microsoft</button>
+  </div>
+
+  <div class="container hidden" id="mfa-email-screen">
+    <h2>Email OTP</h2>
+    <p>An OTP has been sent to your email.</p>
+    <div id="otp-error" class="error"></div>
+    <form id="otp-form">
+      <input type="text" id="otp-code" placeholder="6-digit OTP" required />
+      <button type="submit">Verify OTP</button>
+    </form>
+    <button class="oauth-btn" onclick="sendOtpAgain()">Resend OTP</button>
+  </div>
+
+  <div class="container hidden" id="mfa-totp-screen">
+    <h2>Authenticator App</h2>
+    <p>Enter the code from your app.</p>
+    <div id="totp-error" class="error"></div>
+    <form id="totp-form">
+      <input type="text" id="totp-code" placeholder="6-digit Code" required />
+      <button type="submit">Verify Code</button>
+    </form>
+  </div>
+
+  <div class="container hidden" id="dashboard-screen">
+    <h2>Welcome!</h2>
+    <p>You are logged in.</p>
+    <div id="dashboard-message" class="success"></div>
+    <button onclick="setupAuthenticator()">Enable Authenticator App</button>
+    <div id="setup-totp-section" class="hidden">
+      <img id="qr-code" src="" alt="QR Code" />
+      <p>Scan this QR code with your Authenticator app, then enter the code below to verify.</p>
+      <input type="text" id="setup-totp-code" placeholder="6-digit Code" />
+      <button onclick="enableAuthenticator()">Verify & Enable</button>
+    </div>
+    <button class="oauth-btn" onclick="logout()">Logout</button>
+  </div>
+
+  <script>
+    let currentUserId = null;
+    let jwtToken = null;
+
+    window.addEventListener('message', (event) => {
+      if (event.data.mfa_required) {
+        handleMfaRequired(event.data.user_id, event.data.preferred_mfa);
+      }
+    });
+
+    function openOAuth(url) {
+      window.open(url, 'OAuth', 'width=500,height=600');
+    }
+
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = document.getElementById('email').value;
+      const password = document.getElementById('password').value;
+      const errorDiv = document.getElementById('login-error');
+      
+      try {
+        const res = await fetch('/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+        const data = await res.json();
+        
+        if (res.ok && data.mfa_required) {
+          handleMfaRequired(data.user_id, data.preferred_mfa);
+        } else {
+          errorDiv.innerText = data.error || 'Login failed';
+        }
+      } catch (err) {
+        errorDiv.innerText = 'Network error';
+      }
+    });
+
+    function handleMfaRequired(userId, preferredMfa) {
+      currentUserId = userId;
+      document.getElementById('login-screen').classList.add('hidden');
+      if (preferredMfa === 'totp') {
+        document.getElementById('mfa-totp-screen').classList.remove('hidden');
+      } else {
+        document.getElementById('mfa-email-screen').classList.remove('hidden');
+      }
+    }
+
+    document.getElementById('otp-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const otp = document.getElementById('otp-code').value;
+      const errorDiv = document.getElementById('otp-error');
+      
+      try {
+        const res = await fetch('/mfa/verify-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: currentUserId, otp })
+        });
+        const data = await res.json();
+        
+        if (res.ok) {
+          loginSuccess(data.token);
+        } else {
+          errorDiv.innerText = data.error || 'Invalid OTP';
+        }
+      } catch (err) {
+        errorDiv.innerText = 'Network error';
+      }
+    });
+
+    document.getElementById('totp-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const token = document.getElementById('totp-code').value;
+      const errorDiv = document.getElementById('totp-error');
+      
+      try {
+        const res = await fetch('/mfa/verify-totp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: currentUserId, token })
+        });
+        const data = await res.json();
+        
+        if (res.ok) {
+          loginSuccess(data.token);
+        } else {
+          errorDiv.innerText = data.error || 'Invalid Code';
+        }
+      } catch (err) {
+        errorDiv.innerText = 'Network error';
+      }
+    });
+
+    async function sendOtpAgain() {
+      await fetch('/mfa/send-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: currentUserId })
+      });
+      alert('OTP Resent');
+    }
+
+    function loginSuccess(token) {
+      jwtToken = token;
+      document.getElementById('mfa-email-screen').classList.add('hidden');
+      document.getElementById('mfa-totp-screen').classList.add('hidden');
+      document.getElementById('dashboard-screen').classList.remove('hidden');
+    }
+
+    async function setupAuthenticator() {
+      try {
+        const res = await fetch('/mfa/setup-totp', {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ user_id: currentUserId })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          document.getElementById('qr-code').src = data.qrCode;
+          document.getElementById('setup-totp-section').classList.remove('hidden');
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    async function enableAuthenticator() {
+      const token = document.getElementById('setup-totp-code').value;
+      try {
+        const res = await fetch('/mfa/enable-totp', {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ user_id: currentUserId, token })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          document.getElementById('dashboard-message').innerText = 'Authenticator enabled successfully!';
+          document.getElementById('setup-totp-section').classList.add('hidden');
+        } else {
+          alert(data.error);
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    function logout() {
+      jwtToken = null;
+      currentUserId = null;
+      document.getElementById('dashboard-screen').classList.add('hidden');
+      document.getElementById('login-screen').classList.remove('hidden');
+      document.getElementById('email').value = 'test@example.com';
+      document.getElementById('password').value = 'password123';
+      document.getElementById('otp-code').value = '';
+      document.getElementById('totp-code').value = '';
+    }
+  </script>
+</body>
+</html>
