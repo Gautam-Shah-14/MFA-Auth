@@ -105,7 +105,7 @@ exports.setupTOTP = async (req, res) => {
     const user = userModel.findById(user_id);
     if (!user) return res.status(404).json({ error: 'User not found' });
 
-    const secret = totpService.generateSecret();
+    const secret = totpService.generateSecret(user.email);
     userModel.update(user_id, { totp_secret: secret.base32 });
 
     const qrCode = await totpService.generateQRCode(secret.otpauth_url);

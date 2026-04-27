@@ -1,8 +1,11 @@
 const speakeasy = require('speakeasy');
 const QRCode = require('qrcode');
 
-const generateSecret = () => {
-  const secret = speakeasy.generateSecret({ length: 20 });
+const generateSecret = (email) => {
+  const secret = speakeasy.generateSecret({ 
+    length: 20,
+    name: `TrueArmor:${email}`
+  });
   return secret;
 };
 
