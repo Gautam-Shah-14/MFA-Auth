@@ -13,5 +13,3 @@ jobs:
           cd C:\Users\sfx-admin\Downloads\MFA-Auth
           git pull origin main
           npm i
-          redis-server
-          npm run dev
