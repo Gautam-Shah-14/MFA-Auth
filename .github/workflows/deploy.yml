@@ -13,4 +13,4 @@ jobs:
           cd C:\Users\sfx-admin\Downloads\MFA-Auth
           git pull origin main
           npm i
-          npm run build
+          npm run dev
